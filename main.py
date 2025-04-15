@@ -1,15 +1,14 @@
 from flask import Flask, request, jsonify
 import os
-import openai
 import pandas as pd
+import requests
 from uploaded_file import save_uploaded_file, get_uploaded_df
 
 app = Flask(__name__)
 
-# 🔐 Hardcoded OpenAI API Key (Only for testing/development!)
-openai.api_key = "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"
+# Groq API key
+GROQ_API_KEY = "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"
 
-# 🗂 File Upload Route
 @app.route('/upload', methods=['POST'])
 def upload_file():
     if 'file' not in request.files:
@@ -24,7 +23,6 @@ def upload_file():
     except Exception as e:
         return jsonify({"error": str(e)}), 400
 
-# 💬 Prompt Handling Route
 @app.route('/ask', methods=['POST'])
 def ask():
     data = request.json
@@ -42,23 +40,30 @@ def ask():
     """
 
     try:
-        response = openai.ChatCompletion.create(
-            model="gpt-4",
-            messages=[{"role": "user", "content": groq_prompt}]
-        )
+        headers = {
+            "Authorization": f"Bearer {GROQ_API_KEY}",
+            "Content-Type": "application/json"
+        }
 
-        code = response['choices'][0]['message']['content']
+        payload = {
+            "model": "mixtral-8x7b-32768",
+            "messages": [{"role": "user", "content": groq_prompt}]
+        }
 
+        response = requests.post("https://api.groq.com/openai/v1/chat/completions", headers=headers, json=payload)
+        response.raise_for_status()
+        groq_result = response.json()
+        code = groq_result['choices'][0]['message']['content']
+
+        # Execute the code safely
         local_vars = {"df": df}
         exec(code, {}, local_vars)
 
         result = local_vars.get("result", "✅ Code executed. No output returned.")
-
         return jsonify({"output": str(result), "code": code})
+
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-# ✅ App Runner (Works with Render)
 if __name__ == '__main__':
-    port = int(os.environ.get("PORT", 5000))  # Render provides PORT env var automatically
-    app.run(host='0.0.0.0', port=port)
+    app.run(debug=True)
