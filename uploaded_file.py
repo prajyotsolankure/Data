@@ -1,23 +1,21 @@
+import os
 import pandas as pd
 
-# Store uploaded file data here
-uploaded_file_data = {
-    "filename": None,
-    "df": None
-}
+UPLOAD_FOLDER = "./uploads"
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+uploaded_filepath = None
 
 def save_uploaded_file(file, filename):
-    if filename.endswith(".csv"):
-        df = pd.read_csv(file)
-    elif filename.endswith(".xlsx"):
-        df = pd.read_excel(file)
-    elif filename.endswith(".json"):
-        df = pd.read_json(file)
-    else:
-        raise ValueError("Unsupported file type")
-
-    uploaded_file_data["filename"] = filename
-    uploaded_file_data["df"] = df
+    global uploaded_filepath
+    uploaded_filepath = os.path.join(UPLOAD_FOLDER, filename)
+    file.save(uploaded_filepath)
 
 def get_uploaded_df():
-    return uploaded_file_data["df"]
+    if uploaded_filepath and os.path.exists(uploaded_filepath):
+        if uploaded_filepath.endswith('.csv'):
+            return pd.read_csv(uploaded_filepath)
+        elif uploaded_filepath.endswith('.xlsx'):
+            return pd.read_excel(uploaded_filepath)
+        elif uploaded_filepath.endswith('.json'):
+            return pd.read_json(uploaded_filepath)
+    return None
