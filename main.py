@@ -1,89 +1,128 @@
 from flask import Flask, request, jsonify
-import os
 import pandas as pd
+import traceback
 import requests
-from uploaded_file import save_uploaded_file, get_uploaded_df
+import os
 
 app = Flask(__name__)
 
-# Your provided Groq API Key
+# Groq API credentials
 GROQ_API_KEY = "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"
-GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
-MODEL = "llama3-70b-8192"
+MODEL = "mixtral-8x7b-32768"
 
+# Global variable for DataFrame
+df_lower = None
+
+# Upload route
 @app.route('/upload', methods=['POST'])
-def upload_file():
+def upload():
+    global df_lower
     if 'file' not in request.files:
-        return jsonify({"error": "No file part"}), 400
-
+        return jsonify({'error': 'No file part in the request'}), 400
     file = request.files['file']
-    filename = file.filename
+    if file.filename == '':
+        return jsonify({'error': 'No selected file'}), 400
 
     try:
-        save_uploaded_file(file, filename)
-        return jsonify({"message": f"{filename} uploaded successfully."})
-    except Exception as e:
-        return jsonify({"error": str(e)}), 400
+        if file.filename.endswith('.csv'):
+            df = pd.read_csv(file)
+        elif file.filename.endswith('.xlsx'):
+            df = pd.read_excel(file)
+        elif file.filename.endswith('.json'):
+            df = pd.read_json(file)
+        else:
+            return jsonify({'error': 'Unsupported file format'}), 400
 
+        df_lower = df.copy()
+        df_lower.columns = df_lower.columns.str.lower()
+        return jsonify({'message': 'File uploaded and processed successfully'}), 200
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+# Ask route
 @app.route('/ask', methods=['POST'])
 def ask():
+    global df_lower
+    if df_lower is None:
+        return jsonify({"error": "Please upload a dataset first."}), 400
+
     data = request.json
     prompt = data.get("prompt")
 
-    df = get_uploaded_df()
-    if df is None:
-        return jsonify({"error": "No file uploaded yet"}), 400
+    if not prompt:
+        return jsonify({"error": "Prompt is required."}), 400
 
-    df_lower = df.copy()
-    df_lower.columns = [col.lower() for col in df.columns]
+    # 1. Use Groq to generate Pandas code
+    try:
+        code_prompt = f"""
+You are a helpful data analyst. Write ONLY valid Python Pandas code that answers the following question using the DataFrame `df_lower`.
 
-    groq_prompt = f"""
-You are a helpful data analyst. Write **only** valid Python Pandas code that answers the following question using the DataFrame `df_lower`.
-Note: `df_lower` has all lowercase column names, even if the original columns were uppercase.
+Note: `df_lower` has all lowercase column names.
 
 Question: {prompt}
 
-Only return code that assigns the answer to a variable named `result`.
-Do not return markdown or explanations.
+Only return Python code that assigns the answer to a variable named `result`. Do NOT include markdown, explanations, or text.
 """
+        code = call_groq(code_prompt)
+        if not code:
+            return jsonify({"error": "Failed to generate code from Groq API."}), 500
+        code = code.strip().strip("```python").strip("```")
 
-    try:
-        response = requests.post(
-            GROQ_URL,
-            headers={
-                "Authorization": f"Bearer {GROQ_API_KEY}",
-                "Content-Type": "application/json"
-            },
-            json={
-                "model": MODEL,
-                "messages": [{"role": "user", "content": groq_prompt}],
-                "temperature": 0.2
-            }
-        )
-
-        if response.status_code != 200:
-            return jsonify({
-                "error": "Groq API error",
-                "status": response.status_code,
-                "details": response.text
-            }), 500
-
-        data = response.json()
-        code = data['choices'][0]['message']['content'].strip()
-        if code.startswith("```"):
-            code = code.strip("```").strip("python").strip()
-
-        local_vars = {"df": df, "df_lower": df_lower}
+        # 2. Execute the code
+        local_vars = {'df_lower': df_lower}
         exec(code, {}, local_vars)
+        result = local_vars['result']
 
-        result = local_vars.get("result", "✅ Code executed but no result returned.")
-        return jsonify({
-            "output": str(result),
-            "code": code
-        })
+        # 3. Convert result to string (head for large DataFrames)
+        if isinstance(result, pd.DataFrame):
+            result_str = result.head(5).to_string(index=False)
+        else:
+            result_str = str(result)
 
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": f"Failed to run code: {str(e)}", "trace": traceback.format_exc()}), 500
+
+    # 4. Send result back to Groq for formatting
+    try:
+        reformat_prompt = f"""
+The user asked: "{prompt}"
+
+This is the raw result from executing Python Pandas code:
+
+{result_str}
+
+Now explain this result to a non-technical user in a clear, human-readable way.
+"""
+        explanation = call_groq(reformat_prompt)
+        if not explanation:
+            return jsonify({"error": "Failed to reformat result using Groq API."}), 500
+
+        return jsonify({"output": explanation})
+
+    except Exception as e:
+        return jsonify({"error": f"Failed to contact Groq API for reformatting: {str(e)}"}), 500
+
+
+# Call Groq helper
+def call_groq(prompt):
+    url = "https://api.groq.com/openai/v1/chat/completions"
+    headers = {
+        "Authorization": f"Bearer {GROQ_API_KEY}",
+        "Content-Type": "application/json"
+    }
+    response = requests.post(url, headers=headers, json={
+        "model": MODEL,
+        "messages": [{"role": "user", "content": prompt}],
+        "temperature": 0.2
+    })
+
+    if response.status_code == 200:
+        result = response.json()
+        return result['choices'][0]['message']['content']
+    return None
+
 
 if __name__ == '__main__':
-    app.run(host="0.0.0.0", port=5000, debug=True)
+    app.run(host='0.0.0.0', port=5000)
