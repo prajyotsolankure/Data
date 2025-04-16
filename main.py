@@ -3,8 +3,9 @@ import requests
 
 app = Flask(__name__)
 
-GROQ_API_KEY = "your-groq-api-key"  # Replace with your actual key
-MODEL = "mixtral-8x7b-32768"  # Replace with your model name
+# Use your provided Groq API key here
+GROQ_API_KEY = "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"
+MODEL = "mixtral-8x7b-32768"  # You can use the correct model for your use case
 
 # Function to call Groq API
 def groq_api_call(prompt):
