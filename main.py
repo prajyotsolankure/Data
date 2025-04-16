@@ -17,21 +17,48 @@ def groq_api_call(prompt):
 
     # Create Groq prompt to generate Python code for Pandas
     groq_prompt = f"""
-    You are a helpful data analyst. Write **only** valid Python Pandas code that answers the following question using the DataFrame `df_lower`.
-    Note: `df_lower` has all lowercase column names, even if the original columns were uppercase.
-
+    You are a helpful data analyst. Write **only** valid Python Pandas code that answers the following question using the DataFrame `df_lower` (all column names are lowercase):
+    
     Question: {prompt}
 
     Only return code that assigns the answer to a variable named `result`.
     Do not return markdown or explanations.
     """
-    
+
     response = requests.post(
         url,
         headers=headers,
         json={
             "model": MODEL,
             "messages": [{"role": "user", "content": groq_prompt}],
+            "temperature": 0.2
+        }
+    )
+
+    return response.json()
+
+# Function to call Groq API for reformatting the code
+def groq_reformat_api_call(code):
+    url = "https://api.groq.com/openai/v1/chat/completions"
+    headers = {
+        "Authorization": f"Bearer {GROQ_API_KEY}",
+        "Content-Type": "application/json"
+    }
+
+    # Create a prompt for reformatting the Python code
+    reformat_prompt = f"""
+    Reformat the following Python code into a clean, user-friendly format:
+    {code}
+
+    Please return the result in a readable, neat format with clear explanations.
+    """
+
+    response = requests.post(
+        url,
+        headers=headers,
+        json={
+            "model": MODEL,
+            "messages": [{"role": "user", "content": reformat_prompt}],
             "temperature": 0.2
         }
     )
@@ -46,7 +73,7 @@ def ask():
     if not prompt:
         return jsonify({"error": "Prompt is required."}), 400
 
-    # Step 1: Call Groq API to process the user prompt
+    # Step 1: Call Groq API to process the user prompt and generate code
     try:
         groq_response = groq_api_call(prompt)
         if 'choices' not in groq_response or not groq_response['choices']:
@@ -61,20 +88,15 @@ def ask():
     except Exception as e:
         return jsonify({"error": f"Failed to contact Groq API: {str(e)}"}), 500
 
-    # Step 2: Reformat output (using Groq API again for better response formatting)
+    # Step 2: Reformat the code to make it user-friendly
     try:
-        reformat_prompt = f"""
-        Reformat the following response from Python code to a clean, user-friendly format:
-        {code}
-        Please return the result in a readable, neat format with clear explanations if possible.
-        """
-
-        groq_reformat_response = groq_api_call(reformat_prompt)
+        groq_reformat_response = groq_reformat_api_call(code)
         if 'choices' not in groq_reformat_response or not groq_reformat_response['choices']:
             return jsonify({"error": "Failed to reformat output using Groq API."}), 500
 
+        # Get the user-friendly output
         final_response = groq_reformat_response['choices'][0]['message']['content'].strip()
-        
+
     except Exception as e:
         return jsonify({"error": f"Failed to contact Groq API for reformatting: {str(e)}"}), 500
 
