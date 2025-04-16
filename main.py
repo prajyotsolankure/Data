@@ -8,7 +8,7 @@ app = Flask(__name__)
 
 # Groq API credentials
 GROQ_API_KEY = "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"
-MODEL = "mixtral-8x7b-32768"
+MODEL = "llama3-70b-8192"  # Updated model since mixtral was deprecated
 
 # Global variable for DataFrame
 df_lower = None
@@ -33,8 +33,10 @@ def upload():
         else:
             return jsonify({'error': 'Unsupported file format'}), 400
 
+        # Save the dataframe with lowercase column names
         df_lower = df.copy()
         df_lower.columns = df_lower.columns.str.lower()
+
         return jsonify({'message': 'File uploaded and processed successfully'}), 200
 
     except Exception as e:
@@ -57,7 +59,7 @@ def ask():
     # 1. Use Groq to generate Pandas code
     try:
         code_prompt = f"""
-You are a helpful data analyst. Write ONLY valid Python Pandas code that answers the following question using the DataFrame `df_lower`.
+You are a helpful data analyst. Write ONLY valid Python Pandas code that answers the following question using the DataFrame `df_lower`:
 
 Note: `df_lower` has all lowercase column names.
 
@@ -84,7 +86,7 @@ Only return Python code that assigns the answer to a variable named `result`. Do
     except Exception as e:
         return jsonify({"error": f"Failed to run code: {str(e)}", "trace": traceback.format_exc()}), 500
 
-    # 4. Send result back to Groq for formatting
+    # 4. Send result back to Groq for concise formatting
     try:
         reformat_prompt = f"""
 The user asked: "{prompt}"
@@ -93,13 +95,13 @@ This is the raw result from executing Python Pandas code:
 
 {result_str}
 
-Now explain this result to a non-technical user in a clear, human-readable way.
+Now summarize this result concisely without excessive details. Just provide the answer.
 """
-        explanation = call_groq(reformat_prompt)
-        if not explanation:
+        concise_answer = call_groq(reformat_prompt)
+        if not concise_answer:
             return jsonify({"error": "Failed to reformat result using Groq API."}), 500
 
-        return jsonify({"output": explanation})
+        return jsonify({"output": concise_answer})
 
     except Exception as e:
         return jsonify({"error": f"Failed to contact Groq API for reformatting: {str(e)}"}), 500
@@ -112,17 +114,26 @@ def call_groq(prompt):
         "Authorization": f"Bearer {GROQ_API_KEY}",
         "Content-Type": "application/json"
     }
+
     response = requests.post(url, headers=headers, json={
         "model": MODEL,
         "messages": [{"role": "user", "content": prompt}],
         "temperature": 0.2
     })
 
-    if response.status_code == 200:
+    try:
         result = response.json()
+    except Exception as e:
+        print("❌ Failed to parse JSON:", e)
+        print("Raw response:", response.text)
+        return None
+
+    if 'choices' in result and result['choices']:
         return result['choices'][0]['message']['content']
-    return None
+    else:
+        print("❌ Groq did not return valid choices:", result)
+        return None
 
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000)
+    app.run(host='0.0.0.0', port=5000, debug=True)
