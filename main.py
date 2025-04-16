@@ -6,7 +6,7 @@ from uploaded_file import save_uploaded_file, get_uploaded_df
 
 app = Flask(__name__)
 
-# Hardcoded Groq API key (not recommended for production)
+# Your provided Groq API Key
 GROQ_API_KEY = "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"
 GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
 MODEL = "llama3-70b-8192"
@@ -61,26 +61,29 @@ Do not return markdown or explanations.
             }
         )
 
+        if response.status_code != 200:
+            return jsonify({
+                "error": "Groq API error",
+                "status": response.status_code,
+                "details": response.text
+            }), 500
+
         data = response.json()
-
-        if 'choices' not in data or not data['choices']:
-            return jsonify({"error": "Failed to generate valid code from Groq API."}), 500
-
         code = data['choices'][0]['message']['content'].strip()
         if code.startswith("```"):
             code = code.strip("```").strip("python").strip()
 
         local_vars = {"df": df, "df_lower": df_lower}
+        exec(code, {}, local_vars)
 
-        try:
-            exec(code, {}, local_vars)
-            result = local_vars.get("result", "✅ Code executed but no result returned.")
-            return jsonify({"output": str(result), "code": code})
-        except Exception as e:
-            return jsonify({"code": code, "error": f"Groq returned invalid Python code: {str(e)}"}), 500
+        result = local_vars.get("result", "✅ Code executed but no result returned.")
+        return jsonify({
+            "output": str(result),
+            "code": code
+        })
 
     except Exception as e:
-        return jsonify({"error": f"Failed to contact Groq API: {str(e)}"}), 500
+        return jsonify({"error": str(e)}), 500
 
 if __name__ == '__main__':
     app.run(host="0.0.0.0", port=5000, debug=True)
