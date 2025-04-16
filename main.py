@@ -10,7 +10,7 @@ app = Flask(__name__)
 app.config['UPLOAD_FOLDER'] = 'uploads'
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 
-client = Groq(api_key="YOUR_GROQ_API_KEY")  # Replace with your actual key
+client = Groq(api_key=os.getenv("GROQ_API_KEY"))
 
 df_lower = None  # Global DataFrame
 
@@ -59,7 +59,6 @@ def ask():
     # Check if prompt requires data display
     if any(word in prompt.lower() for word in ['show', 'display', 'print', 'give rows', 'head(', 'records']):
         try:
-            # Limit rows to display
             if 'first 5' in prompt.lower() or '5 rows' in prompt.lower():
                 output_df = df_lower.head(5)
             elif '10 rows' in prompt.lower():
@@ -67,7 +66,6 @@ def ask():
             else:
                 output_df = df_lower.head(8)
 
-            # Plot as image
             fig, ax = plt.subplots(figsize=(10, 2 + 0.3 * len(output_df)))
             ax.axis('off')
             tbl = ax.table(cellText=output_df.values,
@@ -85,13 +83,14 @@ def ask():
                 f.write(img_buf.read())
 
             return jsonify({'image_url': f'/image/{image_id}'})
-
         except Exception as e:
             return jsonify({'error': f'Failed to generate image: {str(e)}'}), 500
 
-    # Otherwise use LLM
     try:
-        messages = [{"role": "user", "content": f"The user uploaded this data with columns {list(df_lower.columns)}. Based on that, answer this query: {prompt}"}]
+        messages = [{
+            "role": "user",
+            "content": f"The user uploaded this data with columns {list(df_lower.columns)}. Based on that, answer this query: {prompt}"
+        }]
 
         chat_completion = client.chat.completions.create(
             messages=messages,
@@ -113,4 +112,4 @@ def get_image(image_id):
 
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    app.run(host='0.0.0.0', port=5000)
