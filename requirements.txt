@@ -1,5 +1,5 @@
-flask
+Flask
 pandas
-requests
 matplotlib
 groq
+openpyxl
