@@ -10,7 +10,7 @@ app = Flask(__name__)
 app.config['UPLOAD_FOLDER'] = 'uploads'
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 
-client = Groq(api_key=os.getenv("GROQ_API_KEY"))
+client = Groq(api_key="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")
 
 df_lower = None  # Global DataFrame
 
@@ -39,7 +39,7 @@ def upload_file():
         else:
             return jsonify({'error': 'Unsupported file type'}), 400
         df_lower.columns = df_lower.columns.str.lower()
-        return jsonify({'message': 'File uploaded and processed successfully'})
+        return jsonify({'message': 'File uploaded and processed successfully'}), 200
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
@@ -56,7 +56,7 @@ def ask():
     if df_lower is None:
         return jsonify({'error': 'No file uploaded yet'}), 400
 
-    # Check if prompt requires data display
+    # Check if prompt requires data display (table format)
     if any(word in prompt.lower() for word in ['show', 'display', 'print', 'give rows', 'head(', 'records']):
         try:
             if 'first 5' in prompt.lower() or '5 rows' in prompt.lower():
@@ -82,7 +82,7 @@ def ask():
             with open(image_path, "wb") as f:
                 f.write(img_buf.read())
 
-            return jsonify({'image_url': f'/image/{image_id}'})
+            return jsonify({'image_url': f'/image/{image_id}'}), 200
         except Exception as e:
             return jsonify({'error': f'Failed to generate image: {str(e)}'}), 500
 
@@ -98,7 +98,7 @@ def ask():
         )
 
         response_text = chat_completion.choices[0].message.content
-        return jsonify({'output': response_text})
+        return jsonify({'output': response_text}), 200
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
