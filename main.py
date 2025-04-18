@@ -1,115 +1,144 @@
 from flask import Flask, request, jsonify, send_file
 import pandas as pd
-import os
-import uuid
 import matplotlib.pyplot as plt
-from groq import Groq
+import traceback
+import uuid
 import io
+import os
+import requests
 
 app = Flask(__name__)
-app.config['UPLOAD_FOLDER'] = 'uploads'
-os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
+UPLOAD_FOLDER = 'uploads'
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
-client = Groq(api_key="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")
-
-df_lower = None  # Global DataFrame
-
+df_lower = None
+GROQ_API_KEY = "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"
+MODEL = "llama3-70b-8192"
 
 @app.route('/upload', methods=['POST'])
-def upload_file():
+def upload():
     global df_lower
     if 'file' not in request.files:
-        return jsonify({'error': 'No file part in request'}), 400
-
+        return jsonify({'error': 'No file part in the request'}), 400
     file = request.files['file']
     if file.filename == '':
         return jsonify({'error': 'No selected file'}), 400
 
-    file_ext = file.filename.rsplit('.', 1)[1].lower()
-    filepath = os.path.join(app.config['UPLOAD_FOLDER'], file.filename)
-    file.save(filepath)
-
     try:
-        if file_ext == 'csv':
-            df_lower = pd.read_csv(filepath)
-        elif file_ext in ['xls', 'xlsx']:
-            df_lower = pd.read_excel(filepath)
-        elif file_ext == 'json':
-            df_lower = pd.read_json(filepath)
+        if file.filename.endswith('.csv'):
+            df = pd.read_csv(file)
+        elif file.filename.endswith('.xlsx'):
+            df = pd.read_excel(file)
+        elif file.filename.endswith('.json'):
+            df = pd.read_json(file)
         else:
-            return jsonify({'error': 'Unsupported file type'}), 400
+            return jsonify({'error': 'Unsupported file format'}), 400
+
+        df_lower = df.copy()
         df_lower.columns = df_lower.columns.str.lower()
         return jsonify({'message': 'File uploaded and processed successfully'}), 200
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-
 @app.route('/ask', methods=['POST'])
 def ask():
     global df_lower
-    data = request.get_json()
-    prompt = data.get('prompt', '')
+    if df_lower is None:
+        return jsonify({"error": "Please upload a dataset first."}), 400
+
+    data = request.json
+    prompt = data.get("prompt", "").lower()
 
     if not prompt:
-        return jsonify({'error': 'Prompt missing'}), 400
+        return jsonify({"error": "Prompt is required."}), 400
 
-    if df_lower is None:
-        return jsonify({'error': 'No file uploaded yet'}), 400
-
-    # Check if prompt requires data display (table format)
-    if any(word in prompt.lower() for word in ['show', 'display', 'print', 'give rows', 'head(', 'records']):
+    # Hybrid: if user wants to see a table
+    if any(word in prompt for word in ['show', 'display', 'table', 'print', 'give 5 rows', '5 rows', 'head']):
         try:
-            if 'first 5' in prompt.lower() or '5 rows' in prompt.lower():
-                output_df = df_lower.head(5)
-            elif '10 rows' in prompt.lower():
-                output_df = df_lower.head(10)
-            else:
-                output_df = df_lower.head(8)
-
-            fig, ax = plt.subplots(figsize=(10, 2 + 0.3 * len(output_df)))
+            preview_df = df_lower.head(5)
+            fig, ax = plt.subplots(figsize=(10, 2 + 0.3 * len(preview_df)))
             ax.axis('off')
-            tbl = ax.table(cellText=output_df.values,
-                           colLabels=output_df.columns,
-                           cellLoc='center', loc='center')
-            tbl.scale(1, 1.5)
+            table = ax.table(cellText=preview_df.values, colLabels=preview_df.columns, cellLoc='center', loc='center')
+            table.scale(1, 1.5)
             plt.tight_layout()
 
             img_buf = io.BytesIO()
             plt.savefig(img_buf, format='png')
             img_buf.seek(0)
-            image_id = str(uuid.uuid4()) + ".png"
-            image_path = os.path.join("uploads", image_id)
-            with open(image_path, "wb") as f:
+
+            image_id = f"{uuid.uuid4()}.png"
+            img_path = os.path.join(UPLOAD_FOLDER, image_id)
+            with open(img_path, 'wb') as f:
                 f.write(img_buf.read())
 
-            return jsonify({'image_url': f'/image/{image_id}'}), 200
+            return jsonify({"image_url": f"/image/{image_id}"})
+
         except Exception as e:
-            return jsonify({'error': f'Failed to generate image: {str(e)}'}), 500
+            return jsonify({'error': f'Failed to generate image: {str(e)}', "trace": traceback.format_exc()}), 500
+
+    # Else, continue with Groq execution
+    try:
+        code_prompt = f"""
+You are a helpful data analyst. Write ONLY valid Python Pandas code that answers the following question using the DataFrame `df_lower`.
+Note: `df_lower` has all lowercase column names.
+Question: {prompt}
+Only return Python code that assigns the answer to a variable named `result`. Do NOT include markdown or explanations.
+"""
+        code = call_groq(code_prompt)
+        code = code.strip().strip("```python").strip("```")
+
+        local_vars = {'df_lower': df_lower}
+        exec(code, {}, local_vars)
+        result = local_vars['result']
+
+        if isinstance(result, pd.DataFrame):
+            result_str = result.head(5).to_string(index=False)
+        else:
+            result_str = str(result)
+
+    except Exception as e:
+        return jsonify({"error": f"Failed to run code: {str(e)}", "trace": traceback.format_exc()}), 500
 
     try:
-        messages = [{
-            "role": "user",
-            "content": f"The user uploaded this data with columns {list(df_lower.columns)}. Based on that, answer this query: {prompt}"
-        }]
+        reformat_prompt = f"""
+The user asked: "{prompt}"
+This is the raw result from executing Python Pandas code:
 
-        chat_completion = client.chat.completions.create(
-            messages=messages,
-            model="llama3-70b-8192"
-        )
+{result_str}
 
-        response_text = chat_completion.choices[0].message.content
-        return jsonify({'output': response_text}), 200
+Now summarize this result concisely without excessive details. Just provide the answer.
+"""
+        concise_answer = call_groq(reformat_prompt)
+        return jsonify({"output": concise_answer})
+
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
+        return jsonify({"error": f"Failed to contact Groq API for reformatting: {str(e)}"}), 500
 
 @app.route('/image/<image_id>')
 def get_image(image_id):
     try:
-        return send_file(os.path.join("uploads", image_id), mimetype='image/png')
+        return send_file(os.path.join(UPLOAD_FOLDER, image_id), mimetype='image/png')
     except:
         return jsonify({'error': 'Image not found'}), 404
 
+def call_groq(prompt):
+    url = "https://api.groq.com/openai/v1/chat/completions"
+    headers = {
+        "Authorization": f"Bearer {GROQ_API_KEY}",
+        "Content-Type": "application/json"
+    }
+
+    response = requests.post(url, headers=headers, json={
+        "model": MODEL,
+        "messages": [{"role": "user", "content": prompt}],
+        "temperature": 0.2
+    })
+
+    try:
+        result = response.json()
+        return result['choices'][0]['message']['content'] if 'choices' in result else None
+    except:
+        return None
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000)
