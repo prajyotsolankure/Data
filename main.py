@@ -6,6 +6,7 @@ import uuid
 import io
 import os
 import requests
+import re
 
 app = Flask(__name__)
 UPLOAD_FOLDER = 'uploads'
@@ -52,13 +53,20 @@ def ask():
     if not prompt:
         return jsonify({"error": "Prompt is required."}), 400
 
-    # Hybrid: if user wants to see a table
-    if any(word in prompt for word in ['show', 'display', 'table', 'print', 'give 5 rows', '5 rows', 'head']):
+    # Check for prompts like "show 5 rows", "give 10 rows", etc.
+    row_match = re.search(r'(\d+)\s+rows?', prompt)
+    show_table_keywords = ['show', 'display', 'table', 'print', 'head']
+    if any(word in prompt for word in show_table_keywords) or row_match:
         try:
-            preview_df = df_lower.head(5)
+            num_rows = int(row_match.group(1)) if row_match else 5
+            preview_df = df_lower.head(num_rows)
+
             fig, ax = plt.subplots(figsize=(10, 2 + 0.3 * len(preview_df)))
             ax.axis('off')
-            table = ax.table(cellText=preview_df.values, colLabels=preview_df.columns, cellLoc='center', loc='center')
+            table = ax.table(cellText=preview_df.values,
+                             colLabels=preview_df.columns,
+                             cellLoc='center',
+                             loc='center')
             table.scale(1, 1.5)
             plt.tight_layout()
 
@@ -76,7 +84,7 @@ def ask():
         except Exception as e:
             return jsonify({'error': f'Failed to generate image: {str(e)}', "trace": traceback.format_exc()}), 500
 
-    # Else, continue with Groq execution
+    # Otherwise, use Groq to generate code
     try:
         code_prompt = f"""
 You are a helpful data analyst. Write ONLY valid Python Pandas code that answers the following question using the DataFrame `df_lower`.
