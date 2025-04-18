@@ -61,17 +61,27 @@ def ask():
             num_rows = int(row_match.group(1)) if row_match else 5
             preview_df = df_lower.head(num_rows)
 
-            fig, ax = plt.subplots(figsize=(10, 2 + 0.3 * len(preview_df)))
+            # HD table rendering
+            rows, cols = preview_df.shape
+            fig_width = max(4, cols * 2.5)
+            fig_height = max(1.5, rows * 0.7)
+
+            fig, ax = plt.subplots(figsize=(fig_width, fig_height), dpi=300)
             ax.axis('off')
+
             table = ax.table(cellText=preview_df.values,
                              colLabels=preview_df.columns,
                              cellLoc='center',
                              loc='center')
-            table.scale(1, 1.5)
-            plt.tight_layout()
+
+            table.auto_set_font_size(False)
+            table.set_fontsize(14)
+            table.scale(1.2, 1.5)
+
+            plt.tight_layout(pad=0.2)
 
             img_buf = io.BytesIO()
-            plt.savefig(img_buf, format='png')
+            plt.savefig(img_buf, format='png', bbox_inches='tight')
             img_buf.seek(0)
 
             image_id = f"{uuid.uuid4()}.png"
