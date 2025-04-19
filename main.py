@@ -8,7 +8,7 @@ import os
 import requests
 import re
 
-app = Flask(__name__)
+app = Flask(_name_)
 UPLOAD_FOLDER = 'uploads'
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
@@ -37,7 +37,7 @@ def upload():
 
         df_lower = df.copy()
         df_lower.columns = df_lower.columns.str.lower()
-        return jsonify({'message': 'File uploaded and processed successfully'}), 200
+        return jsonify({'message': 'File uploaded successfully', 'columns': df_lower.columns.tolist()}), 200
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
@@ -53,17 +53,24 @@ def ask():
     if not prompt:
         return jsonify({"error": "Prompt is required."}), 400
 
-    # Check for prompts like "show 5 rows", "give 10 rows", etc.
-    row_match = re.search(r'(\d+)\s+rows?', prompt)
-    show_table_keywords = ['show', 'display', 'table', 'print', 'head']
-    if any(word in prompt for word in show_table_keywords) or row_match:
-        try:
-            num_rows = int(row_match.group(1)) if row_match else 5
-            preview_df = df_lower.head(num_rows)
+    # Recognize if user wants to view specific rows (head or tail)
+    row_match = re.search(r'(first|last)?\s*(\d+)\s+rows?', prompt)
+    view_keywords = ['show', 'display', 'table', 'print', 'head', 'tail', 'first', 'last', 'top', 'bottom']
 
-            # HD table rendering
+    if any(word in prompt for word in view_keywords) or row_match:
+        try:
+            num_rows = 5
+            is_tail = False
+
+            if row_match:
+                num_rows = int(row_match.group(2))
+                if row_match.group(1) and row_match.group(1) in ['last', 'tail', 'bottom']:
+                    is_tail = True
+
+            preview_df = df_lower.tail(num_rows) if is_tail else df_lower.head(num_rows)
+
             rows, cols = preview_df.shape
-            fig_width = max(4, cols * 2.5)
+            fig_width = max(4, cols * 2)
             fig_height = max(1.5, rows * 0.7)
 
             fig, ax = plt.subplots(figsize=(fig_width, fig_height), dpi=300)
@@ -75,8 +82,9 @@ def ask():
                              loc='center')
 
             table.auto_set_font_size(False)
-            table.set_fontsize(14)
-            table.scale(1.2, 1.5)
+            font_size = max(8, min(14, int(280 / max(cols, 1))))
+            table.set_fontsize(font_size)
+            table.scale(1.1, 1.4)
 
             plt.tight_layout(pad=0.2)
 
@@ -94,16 +102,27 @@ def ask():
         except Exception as e:
             return jsonify({'error': f'Failed to generate image: {str(e)}', "trace": traceback.format_exc()}), 500
 
-    # Otherwise, use Groq to generate code
+    # For all other prompts, try Groq
     try:
         code_prompt = f"""
-You are a helpful data analyst. Write ONLY valid Python Pandas code that answers the following question using the DataFrame `df_lower`.
-Note: `df_lower` has all lowercase column names.
+You are a Python data analyst. Write only valid Python Pandas code to answer the question below using the DataFrame df_lower.
+
+DataFrame Notes:
+- All column names are in lowercase.
+- If the question can't be answered using pandas (e.g., it's unrelated to tabular data or about external knowledge), return: "not_possible".
+
 Question: {prompt}
-Only return Python code that assigns the answer to a variable named `result`. Do NOT include markdown or explanations.
+
+Rules:
+- Assign the final answer to a variable named result.
+- No explanations, markdown, or print statements.
+- Only return code or the word "not_possible".
 """
         code = call_groq(code_prompt)
-        code = code.strip().strip("```python").strip("```")
+        code = code.strip().strip("python").strip("").strip()
+
+        if code.lower() == "not_possible":
+            return jsonify({"output": "This question cannot be answered using pandas."})
 
         local_vars = {'df_lower': df_lower}
         exec(code, {}, local_vars)
@@ -120,11 +139,11 @@ Only return Python code that assigns the answer to a variable named `result`. Do
     try:
         reformat_prompt = f"""
 The user asked: "{prompt}"
-This is the raw result from executing Python Pandas code:
+Raw result:
 
 {result_str}
 
-Now summarize this result concisely without excessive details. Just provide the answer.
+Now summarize this result briefly and clearly without excessive explanation. Just return the core answer.
 """
         concise_answer = call_groq(reformat_prompt)
         return jsonify({"output": concise_answer})
@@ -158,5 +177,5 @@ def call_groq(prompt):
     except:
         return None
 
-if __name__ == '__main__':
+if _name_ == '_main_':
     app.run(host='0.0.0.0', port=5000)
