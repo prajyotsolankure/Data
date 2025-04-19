@@ -8,7 +8,7 @@ import os
 import requests
 import re
 
-app = Flask(__name__)  # ✅ Correct
+app = Flask(_name_)
 UPLOAD_FOLDER = 'uploads'
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
@@ -53,7 +53,6 @@ def ask():
     if not prompt:
         return jsonify({"error": "Prompt is required."}), 400
 
-    # Recognize if user wants to view specific rows (head or tail)
     row_match = re.search(r'(first|last)?\s*(\d+)\s+rows?', prompt)
     view_keywords = ['show', 'display', 'table', 'print', 'head', 'tail', 'first', 'last', 'top', 'bottom']
 
@@ -102,7 +101,6 @@ def ask():
         except Exception as e:
             return jsonify({'error': f'Failed to generate image: {str(e)}', "trace": traceback.format_exc()}), 500
 
-    # For all other prompts, try Groq
     try:
         code_prompt = f"""
 You are a Python data analyst. Write only valid Python Pandas code to answer the question below using the DataFrame df_lower.
@@ -119,7 +117,7 @@ Rules:
 - Only return code or the word "not_possible".
 """
         code = call_groq(code_prompt)
-        code = code.strip().strip("python").strip("").strip()
+        code = code.strip().strip("python").strip("`").strip()
 
         if code.lower() == "not_possible":
             return jsonify({"output": "This question cannot be answered using pandas."})
@@ -177,5 +175,6 @@ def call_groq(prompt):
     except:
         return None
 
+# ✅ Corrected main entry point
 if _name_ == '_main_':
-    app.run(host='0.0.0.0', port=5000)
+    app.run(host='0.0.0.0', port=5000)s
