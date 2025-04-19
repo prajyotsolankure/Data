@@ -8,7 +8,8 @@ import os
 import requests
 import re
 
-app = Flask(_name_)
+app = Flask(__name__)  # ✅ FIXED: Correct Flask app initialization
+
 UPLOAD_FOLDER = 'uploads'
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
@@ -175,6 +176,6 @@ def call_groq(prompt):
     except:
         return None
 
-# ✅ Corrected main entry point
-if _name_ == '_main_':
-    app.run(host='0.0.0.0', port=5000)s
+# ✅ FIXED: Correct entry point
+if __name__ == "__main__":
+    app.run(host='0.0.0.0', port=5000)
