@@ -8,7 +8,7 @@ import os
 import requests
 import re
 
-app = Flask(_name_)
+app = Flask(__name__)  # ✅ Correct
 UPLOAD_FOLDER = 'uploads'
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
